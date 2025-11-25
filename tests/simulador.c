@@ -263,4 +263,4 @@ int main(int argc, char *argv[]) {
     printf("Total de Page Faults: %lu\n", sim.faults);
     free(sim.frames);
     return EXIT_SUCCESS;
-}
+} 
