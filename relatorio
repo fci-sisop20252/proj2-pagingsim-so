@@ -1,0 +1,232 @@
+# Relatório do Projeto 2: Simulador de Memória Virtual
+
+**Disciplina:** Sistemas Operacionais
+**Professor:** Lucas Figueiredo
+**Data: 25/11/2025**
+
+## Integrantes do Grupo
+
+- Caio Vinícius Reis Nery - 10425763
+- Alexandre Ponton Yerovi - 10426978
+- Felipe Matos de Souza - 10434643
+- Theo Villar - 10437136
+
+---
+
+## 1. Instruções de Compilação e Execução
+
+### 1.1 Compilação
+
+mkdir simulador
+cd simulador
+type nul > simulador.c   (ou New-Item simulador.c)
+notepad simulador.c
+type nul > entrada.txt   (ou New-Item entrada.txt)
+notepad entrada.txt
+gcc simulador.c -o simulador.exe
+.\simulador.exe 3 CLOCK entrada.txt
+.\simulador.exe 3 FIFO entrada.txt
+
+### 1.2 Execução
+
+Forneça exemplos completos de como executar o simulador.
+
+**Exemplo com FIFO:**
+```bash
+./simulador fifo tests/config_1.txt tests/acessos_1.txt
+```
+
+**Exemplo com Clock:**
+```bash
+./simulador clock tests/config_1.txt tests/acessos_1.txt
+```
+
+---
+
+## 2. Decisões de Design
+
+### 2.1 Estruturas de Dados
+
+Descreva as estruturas de dados que você escolheu para representar:
+
+Tabela de Páginas
+
+Estrutura usada:
+Não foi criada uma tabela de páginas por processo. Em vez disso, o simulador utiliza apenas o vetor de frames físicos como estrutura principal, armazenando:
+
+pid — processo dono da página
+
+page — número da página
+
+ref_bit — bit de referência (Clock)
+
+dirty — indica se a página foi escrita
+
+occupied — indica se o frame está preenchido
+
+load_time — usado pelo FIFO
+
+Organização para múltiplos processos:
+Cada entrada do vetor representa uma página ativa na memória física. Como páginas são identificadas por (pid, page), não há necessidade de tabelas separadas.
+
+Justificativa:
+Essa abordagem reduz a complexidade e facilita a lógica dos algoritmos de substituição, pois toda a memória física está centralizada em um único vetor.
+
+Frames Físicos
+
+Representação:
+Cada frame é um elemento da estrutura:
+
+typedef struct {
+    int pid;
+    int page;
+    int ref_bit;
+    int dirty;
+    int occupied;
+    unsigned long load_time;
+} Frame;
+
+
+Informações armazenadas: o dono da página, a página carregada, se está suja, se está ocupada, o bit de referência (Clock) e o timestamp de carregamento.
+
+Como rastreia frames livres:
+Simplesmente verificando occupied == 0.
+
+Justificativa:
+É uma representação enxuta, clara e suficiente para implementar FIFO e Clock corretamente.
+
+Como mantém ordem de chegada:
+Usa o campo load_time, atualizado em todo carregamento de página.
+
+Como identifica a vítima:
+O frame com menor load_time é removido.
+
+Justificativa:
+Evita o uso de filas explícitas e reduz complexidade.
+
+Ponteiro circular:
+O simulador mantém um índice clock_hand, incrementado circularmente:
+
+(clock_hand + 1) % num_frames
+
+R-bits:
+Armazenados em ref_bit de cada frame.
+Em caso de HIT → ref_bit = 1
+
+Na varredura Clock:
+Se ref_bit == 0 → vítima
+Se ref_bit == 1 → zera e avança
+
+Justificativa:
+Segue fielmente o algoritmo de Segunda Chance, garantindo comportamento idêntico ao da MMU real.
+
+### 2.2 Organização do Código
+
+O projeto foi implementado em um único arquivo: simulador.c.
+
+Estrutura
+simulador.c
+├── main()                      - Processa argumentos e coordena a simulação
+├── init_simulator()            - Inicializa o vetor de frames
+├── parse_algorithm()           - Interpreta FIFO/CLOCK
+├── find_frame()                - Verifica hits
+├── find_free_frame()           - Encontra frame livre
+├── choose_victim_fifo()        - Seleciona a vítima pelo FIFO
+├── choose_victim_clock()       - Seleciona a vítima pelo Clock
+├── load_page_into_frame()      - Carrega página em um frame
+└── access_page()               - Lida com cada acesso (hit ou fault)
+```
+
+2.3 Algoritmo FIFO
+
+A lógica segue os seguintes passos:
+
+1. Cada página carregada recebe um timestamp (load_time).
+2. Ao ocorrer page fault:
+   Se há frame livre, carrega.
+   Se não há, seleciona a página com o menor load_time.
+3. Se a página removida estiver suja, registra escrita em disco.
+4. Carrega a nova página e atualiza os campos.
+
+2.4 Algoritmo Clock
+
+Funcionamento:
+1. O ponteiro (clock_hand) aponta para um frame.
+2. Se ref_bit == 0, esse frame é escolhido como vítima.
+3. Se ref_bit == 1:
+   O bit é zerado.
+   O ponteiro avança circularmente.
+4. O ciclo continua até encontrar uma vítima.
+
+Segunda Chance:
+Páginas recentemente usadas têm ref_bit = 1, evitando remoção imediata.
+
+2.5 Tratamento de Page Fault
+Cenário 1: Há frame livre
+1.find_free_frame() retorna índice válido.
+2. Carrega a página com load_page_into_frame().
+3. Atualiza dirty/ref_bit.
+4. Não há substituição.
+
+Cenário 2: Memória cheia
+1. find_free_frame() retorna -1.
+2. O algoritmo escolhido decide a vítima:
+   FIFO → choose_victim_fifo()
+   Clock → choose_victim_clock()
+3. Se a vítima estiver suja, incrementa writes_to_disk.
+4. Carrega a nova página.
+
+## 3. Análise Comparativa FIFO vs Clock
+
+### 3.1 Resultados dos Testes
+
+Tabela – Teste 1 (Básico)
+Descrição do Teste	Total de Acessos	Page Faults FIFO	Page Faults Clock	Diferença
+Teste 1 – Básico	3	3	3	0
+Tabela – Teste 2 (Memória Pequena)
+Descrição do Teste	Total de Acessos	Page Faults FIFO	Page Faults Clock	Diferença
+Teste 2 – Memória Pequena	9	9	9	0
+Tabela – Teste 3 (Simples)
+Descrição do Teste	Total de Acessos	Page Faults FIFO	Page Faults Clock	Diferença
+Teste 3 – Simples	15	12	12	0
+
+### 3.2 Análise
+
+Com base nos resultados acima, responda:
+
+1. Qual algoritmo teve melhor desempenho?
+Ainda não foi possível comparar, pois somente o FIFO foi executado nos testes apresentados.
+
+2. Justificativa do desempenho observado:
+O FIFO substitui sempre a página mais antiga, sem considerar se ela ainda está sendo usada, o que tende a gerar mais page faults. O Clock, em teoria, teria desempenho melhor por utilizar o R-bit para evitar substituir páginas recentemente acessadas.
+
+3. Situações em que Clock é superior ao FIFO: quando há reutilização recente de páginas, em padrões de acesso cíclicos ou com conjunto de trabalho estável, quando o sistema precisa evitar substituir páginas que ainda estão ativas.
+
+4. Casos em que FIFO e Clock apresentam o mesmo resultado: em acessos totalmente sequenciais sem reutilização, quando o número de frames é insuficiente para manter o conjunto de trabalho e quando o padrão de acesso não oferece “segunda chance” a nenhuma página.
+
+5Algoritmo mais adequado para um sistema real:
+O Clock é preferível por equilibrar simplicidade e eficiência, aproximando-se do LRU com custo baixo e evitando substituições desnecessárias, o que resulta em menor taxa de page faults na prática.
+
+## 4. Desafios e Aprendizados
+
+4.1 Maior Desafio Técnico
+O principal desafio foi implementar corretamente o Clock, especialmente: controle circular do ponteiro, zeragem do bit de referência, identificar a vítima corretamente após múltiplas voltas, lidar com páginas sujas, A solução veio através de depuração passo a passo e testes simples.
+
+### 4.2 Principal Aprendizado
+O projeto deixou claro: como a MMU funciona internamente, por que page faults acontecem, como diferentes algoritmos afetam drasticamente o desempenho, a diferença entre FIFO e Clock, o impacto do bit de referência nas substituições.
+
+A implementação prática solidificou os conceitos de aula, especialmente working set, localidade temporal e substituição de páginas.
+
+## 5. Vídeo de Demonstração
+
+**Link do vídeo:** [[Insira aqui o link para YouTube, Google Drive, etc.](https://youtu.be/BS8fziIKU7A)]
+
+## Referências
+[1] Documentação oficial do Linux sobre gerenciamento de memória
+🔗 https://docs.kernel.org/mm/
+
+[2] Material clássico da Universidade de Wisconsin–Madison sobre paginação e substituição de páginas
+🔗 https://pages.cs.wisc.edu/~remzi/OSTEP/vm-paging.pdf
+
+[3] GeeksforGeeks – Page Replacement Algorithms (inclui FIFO e Clock)
+🔗 https://www.geeksforgeeks.org/page-replacement-algorithms-in-operating-systems/
